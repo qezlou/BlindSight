@@ -690,7 +690,8 @@ def create_trainer_from_config(config_path: str) -> SpectralVAETrainer:
     with open(config_path, 'r') as f:
         config = json.load(f)
     
-    train_data, val_data = load_training_data(train_split=config['data']['train_split'])
+    train_data, val_data = load_training_data( output_file=config['data']['output_file'],
+                                              train_split=config['data']['train_split'])
     
     normalizer = SpectrumNormalizer()
     normalizer.fit(train_data)
