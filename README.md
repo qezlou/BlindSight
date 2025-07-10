@@ -1,7 +1,7 @@
 # HETGEN: Generative Transformer-VAE for Emission Line Detection
 
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
-![License](https://img.shields.io/github/license/your-username/hetgen)
+![License](https://img.shields.io/github/license/qezlou/hetgen)
 ![Status](https://img.shields.io/badge/status-in--progress-yellow)
 
 > **Note**: This repository is under active development. A detailed publication describing the methodology and results will be released soon.
