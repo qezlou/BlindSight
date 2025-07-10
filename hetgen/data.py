@@ -250,16 +250,97 @@ class MockSpectra:
         1. Draw an emission line from a theoretical distribution
         2. Add the lines to random "Empty Fiber" spectra directly from the observations
     """
-    def __init__(self, size, data_dir):
+    def __init__(self, size, data_dir, output_file=None):
         """
         Initialize the MockSpectra class with a redshift value.
+        Parameters:
+        ------------
+        - size (int): Number of sources to draw.
+        - data_dir (str): Directory containing the empty fiber spectra data.
+        - output_file (str): Path to the output HDF5 file. If None, 
+            the spectra will be generated from scratch.
+        ------------
+        Attributes:
+        - wave (array): Wavelength array of the mock spectra.
+        - mock_spec (array): Mock spectra with emission lines added to the empty fiber spectra.
+        - fiber_spectra (FiberSpectra): Instance of the FiberSpectra class containing
+            the empty fiber spectra.
+        - emission_line (EmissionLine): Instance of the EmissionLine class containing
+            the emission line profile and continuum.
+        ------------
         """
-        self.fiber_spectra = FiberSpectra(data_dir, size=size)  # Initialize with appropriate values
-        self.emission_line = EmissionLine(wave=self.fiber_spectra.wave, size=size)  # Initialize with appropriate values
+        if output_file is None:
+            self.fiber_spectra = FiberSpectra(data_dir, size=size) 
+            self.emission_line = EmissionLine(wave=self.fiber_spectra.wave, size=size) 
+            # Generate the mock spectra by adding emission lines to the empty fiber spectra
+            # Wave in units of Angstrom and spectra in units of erg/s/cm^2/Angstrom * 1e17
+            self.mock_spec = self.emission_line.profile + self.fiber_spectra.spec_1d
+            self.wave = self.fiber_spectra.wave
+        else:
+            # Load the mock spectra from the output file
+            with h5py.File(output_file, 'r') as f:
+                self.wave = f['wave'][:]
+                self.mock_spec = f['mock_spec'][:]
+                self.fiber_spectra = FiberSpectra(data_dir, size=size)
+                self.fiber_spectra.spec_1d = f['raw_spec'][:]
+                self.fiber_spectra.detect_id = f['detect_id'][:]
+                self.emission_line = EmissionLine(wave=self.wave, size=size)
+                self.emission_line.profile = f['emission_line'][:]
+                self.emission_line.lum_model = f.attrs['luminosity_function_model']
+                self.emission_line.R = f.attrs['R']
+                self.emission_line.delta_v = f.attrs['delta_v']
+                self.emission_line.z_min = f.attrs['z_min']
+                self.emission_line.z_max = f.attrs['z_max']
+                self.emission_line.CONSTANT_EW = f.attrs['CONSTANT_EW']
+                
+    def save_spectra(self, output_file):
+        """
+        Save the generated mock spectra to an HDF5 file.
+        Parameters:
+        ------------
+        - output_file (str): Path to the output HDF5 file.
+        """
+        with h5py.File(output_file, 'w') as f:
+            f.create_dataset('wave', data=self.wave)
+            f.create_dataset('mock_spec', data=self.mock_spec)
+            f.create_dataset('emission_line', data=self.emission_line.profile)
+            f.create_dataset('raw_spec', data=self.fiber_spectra.spec_1d)
+            f.create_dataset('detect_id', data=self.fiber_spectra.detect_id)
+            f.attrs['luminosity_function_model'] = self.emission_line.lum_model
+            f.attrs['size'] = self.mock_spec.shape[0]
+            f.attrs['R'] = self.emission_line.R
+            f.attrs['delta_v'] = self.emission_line.delta_v
+            f.attrs['z_min'] = self.emission_line.z_min
+            f.attrs['z_max'] = self.emission_line.z_max
+            f.attrs['CONSTANT_EW'] = self.emission_line.CONSTANT_EW
 
-        # Generate the mock spectra by adding emission lines to the empty fiber spectra
-        # Wave in units of Angstrom and spectra in units of erg/s/cm^2/Angstrom * 1e17
-        self.spec = self.emission_line.profile + self.fiber_spectra.spec_1d
-        self.wave = self.fiber_spectra.wave
+
+def load_training_data(output_file, train_split=0.8, seed=4):
+    """
+    Load the training and validation data from the output file.
+    Parameters:
+    ------------
+    - output_file (str): Path to the output HDF5 file containing the mock spectra.
+    - train_split (float): Proportion of the data to be used for training. Default is 0.8.
+    - seed (int): Random seed for reproducibility. Default is 4.
+    Returns:
+    ------------
+    - training_data (array): Training data containing the emission line and mock spectra.
+    - validation_data (array): Validation data containing the emission line and mock spectra.
+    """
+    with h5py.File(output_file, 'r') as f:
+        data_size = f.attrs['size']
+        # Shuffle the mock spectra
+        np.random.seed(seed)
+        ind = np.random.permutation(data_size)
+        emission_line = f['emission_line'][:]
+        mock_spec = f['mock_spec'][:]
+        data_set = np.concatenate([emission_line[ind, :], mock_spec[ind, :]], axis=0)
+    # split the data into training and validation sets
+    split_index = int(data_set.shape[0] * train_split)
+    training_data = data_set[:split_index]
+    validation_data = data_set[split_index:]
+
+    return training_data, validation_data
 
     

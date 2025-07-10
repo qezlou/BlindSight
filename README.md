@@ -25,6 +25,9 @@ HETGEN is a research-grade, generative deep learning framework designed to detec
 ## Installation
 
 ```bash
+conda create -n hetgen_env python=3.9 numpy scipy astropy h5py matplotlib pytorch torchvision -c pytorch -c conda-forge
+conda activate hetgen_env
+
 git clone https://github.com/your-username/hetgen.git
 cd hetgen
 pip install -r requirements.txt
