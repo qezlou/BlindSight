@@ -1,4 +1,4 @@
-# HETGEN: Generative Transformer-VAE for Emission Line Detection
+# HETGEN: HETDEX Generative Transformer-VAE for Emission Line Detection
 
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
 ![License](https://img.shields.io/github/license/qezlou/hetgen)
