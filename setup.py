@@ -4,11 +4,11 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="em_encoder",
+    name="hetgen",
     version="0.0.0",
     author="Mahdi Qezlou",
     author_email="mahdi.qezlou@email.ucr.edu",
-    description="Emission Line Encoder for HETDEX",
+    description="Emission Line Generator for HETDEX",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/qezlou/private-HETDEX-cosmo",
