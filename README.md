@@ -49,7 +49,7 @@ If you use this codebase in your work, please cite:
   title={HETGEN: A Generative Transformer-VAE for HETDEX},
   author={Mahdi (Sum) Qezlou},
   year={2025},
-  url={https://github.com/your-username/hetgen}
+  url={https://github.com/qezlou/hetgen}
 }
 ```
 
