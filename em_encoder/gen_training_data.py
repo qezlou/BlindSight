@@ -3,6 +3,8 @@ A module to add an emission line on topf the empty fiber spectra in HETDEX.
 """
 
 import numpy as np
+import h5py
+from os import path as op
 from scipy.interpolate import interp1d
 from astropy.cosmology import Planck18 as cosmo
 
@@ -34,10 +36,10 @@ class EmissionLine:
         2. Tweak the luminosity function to match the observed data. Maybe iteratively as 
         Karl is doing.
         """
-
+        self.wave = wave  # Wavelength array in Angstroms
         if wave is None:
             # Default wavelength range in Angstroms
-            self.wave = np.arange(3550, 5500, 2)
+            self.wave = 2.0 * np.arange(1036) + 3470.0
         # Spectral resolution of the instrument
         self.R = R 
          # Angstroms, rest-frame equivalent width of the emission line
@@ -51,7 +53,8 @@ class EmissionLine:
         
         # Velocity dispersion in km/s, should come from theory
         self.delta_v = delta_v
-        self.log_profile, self.log_cont = self.draw_line_profile()
+        # Generate the emission line profile and continuum in units of erg/s/cm^2/Angstrom * 1e17
+        self.profile, self.cont = self.draw_line_profile()
 
     def draw_line_profile(self):
         """
@@ -64,7 +67,9 @@ class EmissionLine:
         amplitude (float): Amplitude of the emission line.
 
         Returns:
-        array: Gaussian profile of the emission line.
+        ------------
+        - line_profile (array): line profile of the emission line in erg/s/cm^2/Angstrom * 1e17.
+        - continuum (array): Continuum of the emission line in erg/s/cm^2/Angstrom * 1e17.
         """
 
         line_center = self.lya_rest * (1 + self.z)  # Convert to observed wavelength
@@ -84,7 +89,7 @@ class EmissionLine:
         ew_obs = ew_rest * (1 + self.z)
         log_cont = log_flux - np.log10(ew_obs)
 
-        return log_profile, log_cont
+        return 10**(log_profile+17), 10**(log_cont+17)
 
     def draw_fwhm(self, line_center):
         """
@@ -213,10 +218,16 @@ class FiberSpectra:
     """
     Class to handle the get observed spectra from the HETDEX database.
     """
-    def __init__(self):
+    def __init__(self, data_dir, size):
         
-        self.wave, self.spectra = self.get_empty_fiber_spectra()
-        pass
+        self.data_dir = data_dir
+        self.size = size  # Number of sources to draw
+        self.wave, self.spec_1d, self.detect_id = self.get_empty_fiber_spectra()
+
+        ind = np.random.choice(self.spec_1d.shape[0], size=self.size, replace=False)
+        self.spec_1d = self.spec_1d[ind, :]
+        self.wave = self.wave[:]
+        self.detect_id = self.detect_id[ind]
     
     def get_empty_fiber_spectra(self):
         """
@@ -226,9 +237,12 @@ class FiberSpectra:
         wave (array): Wavelength array of the empty fiber spectra.
         spectra (array): Empty fiber spectra.
         """
-
-        # This method should connect to the HETDEX database and retrieve the empty fiber spectra.
-        pass
+        data_file = op.join(self.data_dir, 'empty_fibers.h5py')
+        with h5py.File(data_file, 'r') as f:
+            spec_1d = f['spec1D_1e-17'][:]
+            wave = f['wave'][:]
+            detect_id = f['detect_id'][:]
+        return wave, spec_1d, detect_id
 
 class MockSpectra:
     """
@@ -236,27 +250,16 @@ class MockSpectra:
         1. Draw an emission line from a theoretical distribution
         2. Add the lines to random "Empty Fiber" spectra directly from the observations
     """
-    def __init__(self, size):
+    def __init__(self, size, data_dir):
         """
         Initialize the MockSpectra class with a redshift value.
         """
-        #self.fiber_spectra = FiberSpectra()
-        self.emission_line = EmissionLine(size=100)  # Initialize with appropriate values
+        self.fiber_spectra = FiberSpectra(data_dir, size=size)  # Initialize with appropriate values
+        self.emission_line = EmissionLine(wave=self.fiber_spectra.wave, size=size)  # Initialize with appropriate values
 
-        #self.wave, self.spectra = self.get_mock_spectra()
-
-    def get_mock_spectra(self):
-        """
-        Generate mock spectra by adding emission lines to empty fiber spectra.
-
-        Returns:
-        array: Mock spectra with emission lines added.
-        
-        Returns:
-        array: Mock spectra with emission lines added.
-        """
-        empty_spectra = self.fiber_spectra.get_empty_fiber_spectra()
-        # Logic to add emission lines to the empty spectra
-        pass
+        # Generate the mock spectra by adding emission lines to the empty fiber spectra
+        # Wave in units of Angstrom and spectra in units of erg/s/cm^2/Angstrom * 1e17
+        self.spec = self.emission_line.profile + self.fiber_spectra.spec_1d
+        self.wave = self.fiber_spectra.wave
 
     
