@@ -30,7 +30,7 @@ conda activate hetgen_env
 
 git clone https://github.com/your-username/hetgen.git
 cd hetgen
-pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 ## Getting Started

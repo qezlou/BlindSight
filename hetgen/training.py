@@ -686,25 +686,29 @@ def create_trainer_from_config(config_path: str) -> SpectralVAETrainer:
         >>> trainer.val_loader = my_val_loader
         >>> trainer.fit(num_epochs=100)
     """
+    print(f"Loading configuration from {config_path}")
     with open(config_path, 'r') as f:
         config = json.load(f)
     
-    # Create model
+    train_data, val_data = load_training_data(train_split=config['data']['train_split'])
+    
+    normalizer = SpectrumNormalizer()
+    normalizer.fit(train_data)
+
+    train_dataset = SpectralDataset(train_data, normalizer=normalizer)
+    val_dataset = SpectralDataset(val_data, normalizer=normalizer)
+
+    train_loader = DataLoader(train_dataset, batch_size=config['data']['batch_size'], shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=config['data']['batch_size'], shuffle=False)
+
     model = TransformerVAE(**config['model'])
-    
-    # This is a placeholder - you'll need to implement data loading
-    # based on your specific data format
-    train_loader = None  # TODO: Implement data loading
-    val_loader = None    # TODO: Implement data loading
-    
-    # Create trainer
+
     trainer = SpectralVAETrainer(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
         **config['training']
     )
-    
     return trainer
 
 
@@ -782,33 +786,3 @@ def create_example_config():
         json.dump(config, f, indent=2)
     
     return config
-
-
-if __name__ == "__main__":
-    # Example training script
-    
-    # Create example configuration
-    config = create_example_config()
-    print("Example configuration created: training_config.json")
-    
-    train_data, val_data = load_training_data(train_split=config['data']['train_split'])
-    
-    normalizer = SpectrumNormalizer()
-    normalizer.fit(train_data)
-
-    train_dataset = SpectralDataset(train_data, normalizer=normalizer)
-    val_dataset = SpectralDataset(val_data, normalizer=normalizer)
-
-    train_loader = DataLoader(train_dataset, batch_size=config['data']['batch_size'], shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=config['data']['batch_size'], shuffle=False)
-
-    model = TransformerVAE(**config['model'])
-
-    trainer = SpectralVAETrainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        **config['training']
-    )
-    
-    trainer.fit(num_epochs=100)
