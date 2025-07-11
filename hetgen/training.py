@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple, Optional
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import os
+import numpy as np
 
 from .models import TransformerVAE, vae_loss, SpectrumNormalizer
 from .data import load_training_data
@@ -547,32 +548,28 @@ class SpectralVAETrainer:
             data = data.cpu().numpy()
             targets = targets.cpu().numpy()
             x_hat = x_hat.cpu().numpy()
+            # Ensure arrays are 3D: [batch, seq_len, features]
+
+            if data.ndim == 2:
+                data = np.expand_dims(data, axis=-1)
+            if targets.ndim == 2:
+                targets = np.expand_dims(targets, axis=-1)
+            if x_hat.ndim == 2:
+                x_hat = np.expand_dims(x_hat, axis=-1)
             
             fig, axes = plt.subplots(num_samples, 3, figsize=(15, 3*num_samples))
             if num_samples == 1:
                 axes = axes.reshape(1, -1)
                 
             for i in range(min(num_samples, len(data))):
-                # Handle both 2D and 3D data (input_dim=1 vs input_dim>1)
-                if data.ndim == 3:
-                    axes[i, 0].plot(data[i, :, 0])
-                    axes[i, 1].plot(targets[i, :, 0])
-                    axes[i, 2].plot(x_hat[i, :, 0])
-                else:
-                    axes[i, 0].plot(data[i, :])
-                    axes[i, 1].plot(targets[i, :])
-                    axes[i, 2].plot(x_hat[i, :])
-                # Original
                 axes[i, 0].plot(data[i, :, 0])
                 axes[i, 0].set_title(f'Original Spectrum {i+1}')
                 axes[i, 0].grid(True)
                 
-                # Target
                 axes[i, 1].plot(targets[i, :, 0])
                 axes[i, 1].set_title(f'Target Spectrum {i+1}')
                 axes[i, 1].grid(True)
                 
-                # Reconstruction
                 axes[i, 2].plot(x_hat[i, :, 0])
                 axes[i, 2].set_title(f'Reconstructed Spectrum {i+1}')
                 axes[i, 2].grid(True)
