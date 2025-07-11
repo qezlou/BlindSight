@@ -531,47 +531,55 @@ class SpectralVAETrainer:
             - Useful for qualitative assessment of model performance
             - Saved as save_dir/reconstructions.png
         """
-        if self.local_rank == 0:
-            if self.val_loader is None:
-                self.logger.warning("No validation loader available for visualization")
-                return
-
-            self.model.eval()
-
-            with torch.no_grad():
-                data, targets = next(iter(self.val_loader))
-                data, targets = data.to(self.local_rank), targets.to(self.local_rank)
-
-                x_hat, mu, logvar = self.model(data)
-
-                # Move to CPU for plotting
-                data = data.cpu().numpy()
-                targets = targets.cpu().numpy()
-                x_hat = x_hat.cpu().numpy()
-
-                fig, axes = plt.subplots(num_samples, 3, figsize=(15, 3*num_samples))
-                if num_samples == 1:
-                    axes = axes.reshape(1, -1)
-
-                for i in range(min(num_samples, len(data))):
-                    # Original
+        if self.val_loader is None:
+            self.logger.warning("No validation loader available for visualization")
+            return
+            
+        self.model.eval()
+        
+        with torch.no_grad():
+            data, targets = next(iter(self.val_loader))
+            data, targets = data.to(self.device), targets.to(self.device)
+            
+            x_hat, mu, logvar = self.model(data)
+            
+            # Move to CPU for plotting
+            data = data.cpu().numpy()
+            targets = targets.cpu().numpy()
+            x_hat = x_hat.cpu().numpy()
+            
+            fig, axes = plt.subplots(num_samples, 3, figsize=(15, 3*num_samples))
+            if num_samples == 1:
+                axes = axes.reshape(1, -1)
+                
+            for i in range(min(num_samples, len(data))):
+                # Handle both 2D and 3D data (input_dim=1 vs input_dim>1)
+                if data.ndim == 3:
                     axes[i, 0].plot(data[i, :, 0])
-                    axes[i, 0].set_title(f'Original Spectrum {i+1}')
-                    axes[i, 0].grid(True)
-
-                    # Target
                     axes[i, 1].plot(targets[i, :, 0])
-                    axes[i, 1].set_title(f'Target Spectrum {i+1}')
-                    axes[i, 1].grid(True)
-
-                    # Reconstruction
                     axes[i, 2].plot(x_hat[i, :, 0])
-                    axes[i, 2].set_title(f'Reconstructed Spectrum {i+1}')
-                    axes[i, 2].grid(True)
-
-                plt.tight_layout()
-                plt.savefig(self.save_dir / 'reconstructions.png', dpi=300, bbox_inches='tight')
-                plt.show()
+                else:
+                    axes[i, 0].plot(data[i, :])
+                    axes[i, 1].plot(targets[i, :])
+                    axes[i, 2].plot(x_hat[i, :])
+                # Original
+                axes[i, 0].plot(data[i, :, 0])
+                axes[i, 0].set_title(f'Original Spectrum {i+1}')
+                axes[i, 0].grid(True)
+                
+                # Target
+                axes[i, 1].plot(targets[i, :, 0])
+                axes[i, 1].set_title(f'Target Spectrum {i+1}')
+                axes[i, 1].grid(True)
+                
+                # Reconstruction
+                axes[i, 2].plot(x_hat[i, :, 0])
+                axes[i, 2].set_title(f'Reconstructed Spectrum {i+1}')
+                axes[i, 2].grid(True)
+            
+            plt.tight_layout()
+            plt.savefig(self.save_dir / 'reconstructions.png', dpi=300, bbox_inches='tight')
+            plt.show()
     
     def fit(self, num_epochs: int, save_every: int = 10, validate_every: int = 1):
         """
