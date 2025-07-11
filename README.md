@@ -54,6 +54,29 @@ The input to the HETGEN pipeline consists of observational data from the HETDEX 
 
 These inputs help train and evaluate the model's ability to detect true emission lines and reduce false positives.
 
+## How to Run:
+Write the config file for the hyperparameters
+```py
+from hetgen import training
+# save a json  condig file training_config.json
+training.create_example_config()
+```
+Write a script to call this:
+```py
+from hetgen.training import create_trainer_from_config
+
+trainer = create_trainer_from_config('/scratch/06536/qezlou/encoder/submit/training_config.json')
+trainer.fit(num_epochs=10)
+```
+
+Run training on as many GPU as you have, e.g. 4 here:
+
+```sh
+torchrun --nproc_per_node=4 run_train.py
+```
+
+
+
 ## Citation
 
 If you use this codebase in your work, please cite:
