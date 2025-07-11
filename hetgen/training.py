@@ -9,6 +9,9 @@ import json
 from tqdm import tqdm
 import logging
 from typing import Dict, List, Tuple, Optional
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+import os
 
 from .models import TransformerVAE, vae_loss, SpectrumNormalizer
 from .data import load_training_data
@@ -124,26 +127,31 @@ class SpectralVAETrainer:
                  learning_rate: float = 1e-3,
                  kl_weight: float = 1.0,
                  save_dir: str = './checkpoints'):
-        
-        self.model = model.to(device)
+
+        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(self.local_rank)
+        dist.init_process_group(backend='nccl')
+
+        self.model = model.to(self.local_rank)
+        self.model = DDP(self.model, device_ids=[self.local_rank])
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
         self.kl_weight = kl_weight
-        
+
         # Optimizer and scheduler
         self.optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, mode='min', factor=0.5, patience=10, verbose=True
         )
-        
+
         # Tracking
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.train_losses = []
         self.val_losses = []
         self.best_val_loss = float('inf')
-        
+
         # Setup logging
         self.setup_logging()
         self.logger.info(f"CUDA available: {torch.cuda.is_available()}")
@@ -166,15 +174,18 @@ class SpectralVAETrainer:
             This method is called automatically during trainer initialization.
             The log file will be created at {save_dir}/training.log
         """
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(self.save_dir / 'training.log'),
-                logging.StreamHandler()
-            ]
-        )
+        if self.local_rank == 0:
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                handlers=[
+                    logging.FileHandler(self.save_dir / 'training.log'),
+                    logging.StreamHandler()
+                ]
+            )
         self.logger = logging.getLogger(__name__)
+        if self.local_rank != 0:
+            self.logger.setLevel(logging.ERROR)
     
     def weighted_vae_loss(self, x_hat: torch.Tensor, x: torch.Tensor, 
                          mu: torch.Tensor, logvar: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -246,31 +257,31 @@ class SpectralVAETrainer:
         self.model.train()
         epoch_losses = {'total': 0, 'recon': 0, 'kl': 0}
         num_batches = 0
-        
+
         for batch_idx, (data, targets) in enumerate(tqdm(self.train_loader, desc="Training")):
-            data, targets = data.to(self.device), targets.to(self.device)
-            
+            data, targets = data.to(self.local_rank), targets.to(self.local_rank)
+
             self.optimizer.zero_grad()
-            
+
             # Forward pass
             x_hat, mu, logvar = self.model(data)
             total_loss, recon_loss, kl_div = self.weighted_vae_loss(x_hat, targets, mu, logvar)
-            
+
             # Backward pass
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
-            
+
             # Track losses
             epoch_losses['total'] += total_loss.item()
             epoch_losses['recon'] += recon_loss.item()
             epoch_losses['kl'] += kl_div.item()
             num_batches += 1
-        
+
         # Average losses
         for key in epoch_losses:
             epoch_losses[key] /= num_batches
-            
+
         return epoch_losses
     
     def validate(self) -> Dict[str, float]:
@@ -302,27 +313,27 @@ class SpectralVAETrainer:
         """
         if self.val_loader is None:
             return {}
-            
+
         self.model.eval()
         val_losses = {'total': 0, 'recon': 0, 'kl': 0}
         num_batches = 0
-        
+
         with torch.no_grad():
             for data, targets in tqdm(self.val_loader, desc="Validation"):
-                data, targets = data.to(self.device), targets.to(self.device)
-                
+                data, targets = data.to(self.local_rank), targets.to(self.local_rank)
+
                 x_hat, mu, logvar = self.model(data)
                 total_loss, recon_loss, kl_div = self.weighted_vae_loss(x_hat, targets, mu, logvar)
-                
+
                 val_losses['total'] += total_loss.item()
                 val_losses['recon'] += recon_loss.item()
                 val_losses['kl'] += kl_div.item()
                 num_batches += 1
-        
+
         # Average losses
         for key in val_losses:
             val_losses[key] /= num_batches
-            
+
         return val_losses
     
     def save_checkpoint(self, epoch: int, is_best: bool = False):
@@ -355,26 +366,27 @@ class SpectralVAETrainer:
         Note:
             Checkpoints are saved in the save_dir specified during initialization.
         """
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses,
-            'best_val_loss': self.best_val_loss,
-            'kl_weight': self.kl_weight
-        }
-        
-        # Save regular checkpoint
-        checkpoint_path = self.save_dir / f'checkpoint_epoch_{epoch}.pth'
-        torch.save(checkpoint, checkpoint_path)
-        
-        # Save best model
-        if is_best:
-            best_path = self.save_dir / 'best_model.pth'
-            torch.save(checkpoint, best_path)
-            self.logger.info(f"New best model saved at epoch {epoch}")
+        if self.local_rank == 0:
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': self.model.state_dict(),
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'scheduler_state_dict': self.scheduler.state_dict(),
+                'train_losses': self.train_losses,
+                'val_losses': self.val_losses,
+                'best_val_loss': self.best_val_loss,
+                'kl_weight': self.kl_weight
+            }
+
+            # Save regular checkpoint
+            checkpoint_path = self.save_dir / f'checkpoint_epoch_{epoch}.pth'
+            torch.save(checkpoint, checkpoint_path)
+
+            # Save best model
+            if is_best:
+                best_path = self.save_dir / 'best_model.pth'
+                torch.save(checkpoint, best_path)
+                self.logger.info(f"New best model saved at epoch {epoch}")
     
     def load_checkpoint(self, checkpoint_path: str):
         """
@@ -444,46 +456,47 @@ class SpectralVAETrainer:
             - Plot is both saved to disk and displayed (plt.show())
             - Useful for monitoring training progress and diagnosing issues
         """
-        if not self.train_losses:
-            return
-            
-        epochs = range(1, len(self.train_losses) + 1)
-        
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        
-        # Total loss
-        axes[0].plot(epochs, [loss['total'] for loss in self.train_losses], 'b-', label='Train')
-        if self.val_losses:
-            axes[0].plot(epochs, [loss['total'] for loss in self.val_losses], 'r-', label='Validation')
-        axes[0].set_title('Total Loss')
-        axes[0].set_xlabel('Epoch')
-        axes[0].set_ylabel('Loss')
-        axes[0].legend()
-        axes[0].grid(True)
-        
-        # Reconstruction loss
-        axes[1].plot(epochs, [loss['recon'] for loss in self.train_losses], 'b-', label='Train')
-        if self.val_losses:
-            axes[1].plot(epochs, [loss['recon'] for loss in self.val_losses], 'r-', label='Validation')
-        axes[1].set_title('Reconstruction Loss')
-        axes[1].set_xlabel('Epoch')
-        axes[1].set_ylabel('Loss')
-        axes[1].legend()
-        axes[1].grid(True)
-        
-        # KL divergence
-        axes[2].plot(epochs, [loss['kl'] for loss in self.train_losses], 'b-', label='Train')
-        if self.val_losses:
-            axes[2].plot(epochs, [loss['kl'] for loss in self.val_losses], 'r-', label='Validation')
-        axes[2].set_title('KL Divergence')
-        axes[2].set_xlabel('Epoch')
-        axes[2].set_ylabel('KL Div')
-        axes[2].legend()
-        axes[2].grid(True)
-        
-        plt.tight_layout()
-        plt.savefig(self.save_dir / 'training_losses.png', dpi=300, bbox_inches='tight')
-        plt.show()
+        if self.local_rank == 0:
+            if not self.train_losses:
+                return
+
+            epochs = range(1, len(self.train_losses) + 1)
+
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+            # Total loss
+            axes[0].plot(epochs, [loss['total'] for loss in self.train_losses], 'b-', label='Train')
+            if self.val_losses:
+                axes[0].plot(epochs, [loss['total'] for loss in self.val_losses], 'r-', label='Validation')
+            axes[0].set_title('Total Loss')
+            axes[0].set_xlabel('Epoch')
+            axes[0].set_ylabel('Loss')
+            axes[0].legend()
+            axes[0].grid(True)
+
+            # Reconstruction loss
+            axes[1].plot(epochs, [loss['recon'] for loss in self.train_losses], 'b-', label='Train')
+            if self.val_losses:
+                axes[1].plot(epochs, [loss['recon'] for loss in self.val_losses], 'r-', label='Validation')
+            axes[1].set_title('Reconstruction Loss')
+            axes[1].set_xlabel('Epoch')
+            axes[1].set_ylabel('Loss')
+            axes[1].legend()
+            axes[1].grid(True)
+
+            # KL divergence
+            axes[2].plot(epochs, [loss['kl'] for loss in self.train_losses], 'b-', label='Train')
+            if self.val_losses:
+                axes[2].plot(epochs, [loss['kl'] for loss in self.val_losses], 'r-', label='Validation')
+            axes[2].set_title('KL Divergence')
+            axes[2].set_xlabel('Epoch')
+            axes[2].set_ylabel('KL Div')
+            axes[2].legend()
+            axes[2].grid(True)
+
+            plt.tight_layout()
+            plt.savefig(self.save_dir / 'training_losses.png', dpi=300, bbox_inches='tight')
+            plt.show()
     
     def visualize_reconstructions(self, num_samples: int = 5):
         """
@@ -518,46 +531,47 @@ class SpectralVAETrainer:
             - Useful for qualitative assessment of model performance
             - Saved as save_dir/reconstructions.png
         """
-        if self.val_loader is None:
-            self.logger.warning("No validation loader available for visualization")
-            return
-            
-        self.model.eval()
-        
-        with torch.no_grad():
-            data, targets = next(iter(self.val_loader))
-            data, targets = data.to(self.device), targets.to(self.device)
-            
-            x_hat, mu, logvar = self.model(data)
-            
-            # Move to CPU for plotting
-            data = data.cpu().numpy()
-            targets = targets.cpu().numpy()
-            x_hat = x_hat.cpu().numpy()
-            
-            fig, axes = plt.subplots(num_samples, 3, figsize=(15, 3*num_samples))
-            if num_samples == 1:
-                axes = axes.reshape(1, -1)
-                
-            for i in range(min(num_samples, len(data))):
-                # Original
-                axes[i, 0].plot(data[i, :, 0])
-                axes[i, 0].set_title(f'Original Spectrum {i+1}')
-                axes[i, 0].grid(True)
-                
-                # Target
-                axes[i, 1].plot(targets[i, :, 0])
-                axes[i, 1].set_title(f'Target Spectrum {i+1}')
-                axes[i, 1].grid(True)
-                
-                # Reconstruction
-                axes[i, 2].plot(x_hat[i, :, 0])
-                axes[i, 2].set_title(f'Reconstructed Spectrum {i+1}')
-                axes[i, 2].grid(True)
-            
-            plt.tight_layout()
-            plt.savefig(self.save_dir / 'reconstructions.png', dpi=300, bbox_inches='tight')
-            plt.show()
+        if self.local_rank == 0:
+            if self.val_loader is None:
+                self.logger.warning("No validation loader available for visualization")
+                return
+
+            self.model.eval()
+
+            with torch.no_grad():
+                data, targets = next(iter(self.val_loader))
+                data, targets = data.to(self.local_rank), targets.to(self.local_rank)
+
+                x_hat, mu, logvar = self.model(data)
+
+                # Move to CPU for plotting
+                data = data.cpu().numpy()
+                targets = targets.cpu().numpy()
+                x_hat = x_hat.cpu().numpy()
+
+                fig, axes = plt.subplots(num_samples, 3, figsize=(15, 3*num_samples))
+                if num_samples == 1:
+                    axes = axes.reshape(1, -1)
+
+                for i in range(min(num_samples, len(data))):
+                    # Original
+                    axes[i, 0].plot(data[i, :, 0])
+                    axes[i, 0].set_title(f'Original Spectrum {i+1}')
+                    axes[i, 0].grid(True)
+
+                    # Target
+                    axes[i, 1].plot(targets[i, :, 0])
+                    axes[i, 1].set_title(f'Target Spectrum {i+1}')
+                    axes[i, 1].grid(True)
+
+                    # Reconstruction
+                    axes[i, 2].plot(x_hat[i, :, 0])
+                    axes[i, 2].set_title(f'Reconstructed Spectrum {i+1}')
+                    axes[i, 2].grid(True)
+
+                plt.tight_layout()
+                plt.savefig(self.save_dir / 'reconstructions.png', dpi=300, bbox_inches='tight')
+                plt.show()
     
     def fit(self, num_epochs: int, save_every: int = 10, validate_every: int = 1):
         """
@@ -601,46 +615,51 @@ class SpectralVAETrainer:
             - Best model is saved automatically when validation improves
             - Final visualizations are generated at the end of training
         """
-        self.logger.info(f"Starting training for {num_epochs} epochs")
-        self.logger.info(f"Model has {sum(p.numel() for p in self.model.parameters()):,} parameters")
-        
+        if self.local_rank == 0:
+            self.logger.info(f"Starting training for {num_epochs} epochs")
+            self.logger.info(f"Model has {sum(p.numel() for p in self.model.parameters()):,} parameters")
+
         for epoch in range(1, num_epochs + 1):
-            self.logger.info(f"\nEpoch {epoch}/{num_epochs}")
-            
+            if self.local_rank == 0:
+                self.logger.info(f"\nEpoch {epoch}/{num_epochs}")
+
             # Training
             train_losses = self.train_epoch()
             self.train_losses.append(train_losses)
-            
+
             # Validation
             val_losses = {}
             if epoch % validate_every == 0:
                 val_losses = self.validate()
                 if val_losses:
                     self.val_losses.append(val_losses)
-                    
+
                     # Learning rate scheduling
                     self.scheduler.step(val_losses['total'])
-                    
+
                     # Check for best model
                     if val_losses['total'] < self.best_val_loss:
                         self.best_val_loss = val_losses['total']
                         self.save_checkpoint(epoch, is_best=True)
-            
+
             # Logging
-            log_msg = f"Train Loss: {train_losses['total']:.6f} (Recon: {train_losses['recon']:.6f}, KL: {train_losses['kl']:.6f})"
-            if val_losses:
-                log_msg += f" | Val Loss: {val_losses['total']:.6f} (Recon: {val_losses['recon']:.6f}, KL: {val_losses['kl']:.6f})"
-            self.logger.info(log_msg)
-            
+            if self.local_rank == 0:
+                log_msg = f"Train Loss: {train_losses['total']:.6f} (Recon: {train_losses['recon']:.6f}, KL: {train_losses['kl']:.6f})"
+                if val_losses:
+                    log_msg += f" | Val Loss: {val_losses['total']:.6f} (Recon: {val_losses['recon']:.6f}, KL: {val_losses['kl']:.6f})"
+                self.logger.info(log_msg)
+
             # Save checkpoint
             if epoch % save_every == 0:
                 self.save_checkpoint(epoch)
-        
-        self.logger.info("Training completed!")
-        
-        # Final visualizations
-        self.plot_losses()
-        self.visualize_reconstructions()
+
+        if self.local_rank == 0:
+            self.logger.info("Training completed!")
+            # Final visualizations
+            self.plot_losses()
+            self.visualize_reconstructions()
+
+        dist.destroy_process_group()
 
 
 def create_trainer_from_config(config_path: str) -> SpectralVAETrainer:
