@@ -16,7 +16,7 @@ class EmissionLine:
 
     """
     
-    def __init__(self, wave= None, R=800, delta_v=300, size=10_000_000):
+    def __init__(self, wave= None, R=800, size=10_000_000):
         """
         Initialize and get the emission line profile and continuum.
         Parameters:
@@ -24,7 +24,6 @@ class EmissionLine:
         - wave (array): Wavelength array in Angstroms. If None, a default range
         from 3550 to 5500 Angstroms is used.
         - R (int): Spectral resolution of the instrument.
-        - delta_v (int): Velocity dispersion in km/s, should come from theory.
         - size (int): Number of sources to draw.
         ------------
         Computed attributes:
@@ -51,8 +50,6 @@ class EmissionLine:
         self.z_max = self.wave[-1] / self.lya_rest - 1
         self.z = self.draw_z_distribution()
         
-        # Velocity dispersion in km/s, should come from theory
-        self.delta_v = delta_v
         # Generate the emission line profile and continuum in units of erg/s/cm^2/Angstrom * 1e17
         self.profile, self.cont = self.draw_line_profile()
 
@@ -106,10 +103,32 @@ class EmissionLine:
 
         # Instrumental and intrinsic in Angstroms
         fwhm_instr = line_center / self.R
-        fwhm_intr = line_center * (self.delta_v / 3e5)
+        # Draw intrinsic FWHM from the distribution
+        fwhm_intr = self.draw_fwhm_intrinsic()  #
         # Combined FWHM
         fwhm_total = np.sqrt(fwhm_instr**2 + fwhm_intr**2)
         return fwhm_total
+    
+    def draw_fwhm_intrinsic(self):
+        """
+        Draw the intrinsic FWHM of the emission line.
+
+        Returns:
+        ------------
+        - fwhm_intr (float): Intrinsic FWHM of the emission line in Angstroms.
+        """
+        # Karl's distribution of intrinsic FWHM
+        ew = np.array([2.0, 3.0, 4.0, 5.0, 6.0])
+        pdf = np.array([0.1,0.15,0.32,0.3,0.12])
+        pdf = interp1d(ew, pdf, bounds_error=False, fill_value=0.0)
+        # Draw a random intrinsic FWHM from the distribution
+        # Using the inverse transform sampling method
+        x = np.arange(ew[0], ew[-1], 0.01)
+        cdf = np.cumsum(pdf(x))
+        cdf /= cdf[-1]  # Normalize the CDF
+        sampler = interp1d(cdf, x, bounds_error=False, fill_value=(x[0], x[-1]))
+        fwhm_intr = sampler(np.random.uniform(0, 1, self.size))
+        return fwhm_intr
 
     def draw_equivalent_width(self):
         """
@@ -144,7 +163,7 @@ class EmissionLine:
         # In the future, we can use a more realistic distribution
         return np.random.uniform(self.z_min, self.z_max, size=self.size)
 
-    def draw_luminosity_func(self, logL=None, closest_z=2.2):
+    def draw_luminosity_func(self, logL=None, closest_z=3.1):
         """
         parametrized schechter fit: Ouchine+20 review arxiv:2012.07960
         Draw a list of luminosities from the luminosity function.
@@ -184,7 +203,6 @@ class EmissionLine:
         cdf /= cdf[-1]  # Normalize the CDF
         sampler = interp1d(cdf, logL, bounds_error=False, fill_value=(logL[0], logL[-1]))
         sampled_logL = sampler(np.random.uniform(0, 1, self.size))
-
         return sampled_logL
 
         
@@ -269,6 +287,7 @@ class MockSpectra:
             the emission line profile and continuum.
         ------------
         """
+        self.size = size  # Number of sources to draw
         if output_file is None:
             self.fiber_spectra = FiberSpectra(data_dir, size=size) 
             self.emission_line = EmissionLine(wave=self.fiber_spectra.wave, size=size) 
@@ -288,7 +307,6 @@ class MockSpectra:
                 self.emission_line.profile = f['emission_line'][:]
                 self.emission_line.lum_model = f.attrs['luminosity_function_model']
                 self.emission_line.R = f.attrs['R']
-                self.emission_line.delta_v = f.attrs['delta_v']
                 self.emission_line.z_min = f.attrs['z_min']
                 self.emission_line.z_max = f.attrs['z_max']
                 self.emission_line.CONSTANT_EW = f.attrs['CONSTANT_EW']
@@ -309,7 +327,6 @@ class MockSpectra:
             f.attrs['luminosity_function_model'] = self.emission_line.lum_model
             f.attrs['size'] = self.mock_spec.shape[0]
             f.attrs['R'] = self.emission_line.R
-            f.attrs['delta_v'] = self.emission_line.delta_v
             f.attrs['z_min'] = self.emission_line.z_min
             f.attrs['z_max'] = self.emission_line.z_max
             f.attrs['CONSTANT_EW'] = self.emission_line.CONSTANT_EW
