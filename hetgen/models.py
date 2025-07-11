@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-
+import numpy as np
 # --- Spectrum Normalizer ---
 class SpectrumNormalizer:
     """
@@ -29,6 +29,8 @@ class SpectrumNormalizer:
         Args:
             x (Tensor): Input of shape [batch_size, seq_len, num_features]
         """
+        if isinstance(x, np.ndarray):
+            x = torch.tensor(x)
         flat = x.view(-1, x.size(-1))  # collapse batch and sequence
         self.means = flat.mean(dim=0)
         self.stds = flat.std(dim=0)
@@ -45,7 +47,8 @@ class SpectrumNormalizer:
         """
         if self.means is None or self.stds is None:
             raise RuntimeError("Call fit() before transform().")
-        return (x - self.means) / (self.stds + self.eps)
+        x = (x - self.means) / (self.stds + self.eps)
+        return x.float()
 
     def inverse_transform(self, x):
         """
@@ -74,7 +77,7 @@ class PositionalEncoding(nn.Module):
     Returns:
         Tensor: Same shape as input with position information added.
     """
-    def __init__(self, d_model, max_len=1000):
+    def __init__(self, d_model, max_len=2048):
         super().__init__()
         # Create positional encodings for each spectral bin (wavelength position) using sinusoids of varying frequencies.
         # This encodes the relative position of each point in the 1D spectrum (important for transformer models).
@@ -142,6 +145,7 @@ class TransformerVAEEncoder(nn.Module):
 
     def forward(self, x):
         # Project the 1D spectral input (e.g., flux per wavelength) into a higher dimensional embedding.
+        #print(f'TransformerVAE x.shape {x.shape} before embeding', flush=True)
         x = self.embedding(x)  # [B, L, emb_dim]
         # Add sinusoidal position encoding to inject wavelength position information.
         x = self.pos_encoder(x)
@@ -259,6 +263,8 @@ class TransformerVAE(nn.Module):
 
     def forward(self, x):
         # Full VAE pipeline: encode input spectrum, sample from latent distribution, reconstruct spectrum.
+        if x.dim() == 2:
+            x = x.unsqueeze(-1)  # from [B, L] → [B, L, 1]
         mu, logvar = self.encoder(x)
         z = reparameterize(mu, logvar)
         x_hat = self.decoder(z)
@@ -278,6 +284,8 @@ def vae_loss(x_hat, x, mu, logvar):
     Returns:
         Tuple[Tensor, Tensor, Tensor]: Total loss, reconstruction loss, KL divergence
     """
+    if x.dim() == 2:
+        x = x.unsqueeze(-1) # [B, L] -> [B, L, 1]
     # VAE loss = reconstruction loss + KL divergence (latent regularization).
     # This encourages the latent space to follow a standard normal distribution and ensures reconstruction quality.
     recon_loss = F.mse_loss(x_hat, x, reduction='mean')

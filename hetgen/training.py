@@ -46,8 +46,8 @@ class SpectralDataset(Dataset):
     """
     def __init__(self, spectra: np.ndarray, targets: Optional[np.ndarray] = None, 
                  normalizer: Optional[SpectrumNormalizer] = None):
-        self.spectra = torch.FloatTensor(spectra)
-        self.targets = torch.FloatTensor(targets) if targets is not None else self.spectra
+        self.spectra = torch.Tensor(spectra.astype(np.float32))
+        self.targets = torch.Tensor(targets.astype(np.float32)) if targets is not None else self.spectra
         self.normalizer = normalizer
         
         if self.normalizer:
@@ -146,6 +146,8 @@ class SpectralVAETrainer:
         
         # Setup logging
         self.setup_logging()
+        self.logger.info(f"CUDA available: {torch.cuda.is_available()}")
+        self.logger.info(f"GPU name: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'No GPU found'}")
     
     def setup_logging(self):
         """
@@ -205,6 +207,8 @@ class SpectralVAETrainer:
             - KL divergence is normalized by batch size
             - Total loss = recon_loss + kl_weight * kl_div
         """
+        if x.dim() == 2:
+            x = x.unsqueeze(-1) # [B, L] -> [B, L, 1]
         recon_loss = nn.functional.mse_loss(x_hat, x, reduction='mean')
         kl_div = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.size(0)
         total_loss = recon_loss + self.kl_weight * kl_div
@@ -692,7 +696,7 @@ def create_trainer_from_config(config_path: str) -> SpectralVAETrainer:
     
     train_data, val_data = load_training_data( output_file=config['data']['output_file'],
                                               train_split=config['data']['train_split'])
-    
+    print(f'train_data.shape {train_data.shape} | val_data.shape {val_data.shape}', flush=True) 
     normalizer = SpectrumNormalizer()
     normalizer.fit(train_data)
 
