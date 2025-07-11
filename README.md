@@ -15,6 +15,8 @@ HETGEN is a research-grade, generative deep learning framework designed to detec
 - **False positive mitigation**: Designed to identify and reduce false detections of emission lines using learned latent representations.
 - **Synthetic spectrum generation**: Capable of producing synthetic emission lines and modeling complex noise conditions.
 
+- 
+
 ## Use Cases
 
 - Automated detection of Lyα emission lines in noisy spectral data
@@ -33,12 +35,24 @@ cd hetgen
 python -m pip install -e .
 ```
 
+
 ## Getting Started
 
 Example scripts and notebooks are provided in the `notebooks/` directory to demonstrate:
 - Preprocessing of HETDEX spectral data
 - Model training and evaluation
 - Latent space exploration and synthetic data generation
+
+## Input Description
+
+The input to the HETGEN pipeline consists of observational data from the HETDEX IFU survey. These include:
+
+- **Flux Spectrum**: The observed flux as a function of wavelength, containing both astronomical signal and sky background.
+- **Noise estimates**: Estimated cross the spectrum
+- **Sky Spectrum**: A model or measurement of the sky emission spectrum at the time of observation, used for identifying sky contamination.
+- **Fiber Index**: Identifiers for the spatial position of each spectrum within the IFU field.
+
+These inputs help train and evaluate the model's ability to detect true emission lines and reduce false positives.
 
 ## Citation
 
