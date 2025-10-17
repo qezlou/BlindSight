@@ -1,5 +1,4 @@
-# HETGEN: HETDEX Generative Transformer-VAE for Emission Line Detection
-
+# BlinSight: GenAI for trillion-resolution element blind surveys
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
 ![License](https://img.shields.io/github/license/qezlou/hetgen)
 ![Status](https://img.shields.io/badge/status-in--progress-yellow)
