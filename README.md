@@ -5,6 +5,7 @@
 
 > **Note**: This repository is under active development. A detailed publication describing the methodology and results will be released soon.
 
+![](./hetgen_example.png)
 HETGEN is a research-grade, generative deep learning framework designed to detect faint Lyman-alpha (Lyα) emission lines in galaxy spectra. Built for the HETDEX (Hobby-Eberly Telescope Dark Energy Experiment) survey, this model combines the strengths of Transformer architectures and Variational Autoencoders (VAEs) to effectively model complex spectral features while mitigating the influence of noise, sky residuals, and other systematics.
 
 ## Key Features
